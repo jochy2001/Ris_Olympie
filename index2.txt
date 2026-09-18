@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Palubní počítač SJŘ (Manual)</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #121212; color: #fff; margin: 0; padding: 15px; text-align: center; }
+        .card { background: #1e1e1e; padding: 15px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #333; }
+        .time-display { font-size: 2.5rem; font-weight: bold; color: #00ffcc; margin: 5px 0; }
+        .station-title { font-size: 1.8rem; font-weight: bold; color: #fff; margin: 10px 0; }
+        .delay-text { font-size: 1.5rem; font-weight: bold; margin: 10px 0; }
+        .delay-ok { color: #00ff66; }
+        .delay-late { color: #ff3333; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; text-align: left; }
+        th, td { padding: 10px; border-bottom: 1px solid #333; font-size: 0.95rem; }
+        th { color: #888; }
+        .active-row { background: #2a3b4c; font-weight: bold; }
+        
+        input, button { width: 100%; padding: 12px; margin-top: 8px; border-radius: 6px; border: none; box-sizing: border-box; font-size: 1rem; }
+        button { background: #0088cc; color: #fff; font-weight: bold; cursor: pointer; }
+        .btn-next { background: #00aa55; font-size: 1.2rem; padding: 15px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <div style="font-size: 0.9rem; color: #aaa;">AKTUÁLNÍ ČAS</div>
+        <div id="clock" class="time-display">00:00:00</div>
+    </div>
+
+    <div class="card">
+        <div style="font-size: 0.9rem; color: #aaa;">AKTUÁLNÍ / PŘÍŠTÍ STANICE</div>
+        <div id="current-station" class="station-title">--</div>
+        <div id="schedule-info" style="color: #ccc;">Odjezd dle SJŘ: --:-- | Max: -- km/h</div>
+        <div id="status-delay" class="delay-text delay-ok">--</div>
+        
+        <button class="btn-next" onclick="nextStation()">Další stanice &#10095;</button>
+    </div>
+
+    <div class="card">
+        <h3>Nahrát SJŘ z Google Disku</h3>
+        <input type="text" id="csv-url" placeholder="Vlož odkaz na veřejné CSV">
+        <button onclick="loadSJR()">Načíst jízdní řád</button>
+    </div>
+
+    <div class="card">
+        <h3>Služební jízdní řád</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Stanice</th>
+                    <th>Odjezd</th>
+                    <th>Rychlost</th>
+                </tr>
+            </thead>
+            <tbody id="sjr-table">
+                <tr><td colspan="3" style="text-align:center; color:#666;">Žádná data načtena</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let sjrData = [];
+        let currentIndex = 0;
+
+        // 1. Hodiny
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById("clock").innerText = now.toLocaleTimeString('cs-CZ');
+            updateDelay();
+        }, 1000);
+
+        // 2. Načtení CSV z Google Disku
+        async function loadSJR() {
+            const url = document.getElementById("csv-url").value;
+            if (!url) return alert("Vlož URL odkaz na CSV!");
+
+            try {
+                const response = await fetch(url);
+                const text = await response.text();
+                parseCSV(text);
+            } catch (err) {
+                alert("Chyba při načítání. Zkontroluj odkaz a veřejné sdílení souboru.");
+            }
+        }
+
+        // 3. Zpracování CSV
+        function parseCSV(text) {
+            const lines = text.split("\n");
+            sjrData = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(",");
+                if (cols.length >= 3) {
+                    sjrData.push({
+                        station: cols[0].trim(),
+                        depTime: cols[1].trim(),
+                        maxSpeed: cols[2].trim()
+                    });
+                }
+            }
+
+            if (sjrData.length > 0) {
+                currentIndex = 0;
+                renderTable();
+                selectStation(0);
+            }
+        }
+
+        // 4. Vykreslení tabulky
+        function renderTable() {
+            let tableHtml = "";
+            sjrData.forEach((item, index) => {
+                const rowClass = index === currentIndex ? "active-row" : "";
+                tableHtml += `<tr class="${rowClass}">
+                    <td>${item.station}</td>
+                    <td>${item.depTime}</td>
+                    <td>${item.maxSpeed} km/h</td>
+                </tr>`;
+            });
+            document.getElementById("sjr-table").innerHTML = tableHtml;
+        }
+
+        // 5. Výběr stanice
+        function selectStation(index) {
+            if (index >= sjrData.length) return;
+            
+            currentIndex = index;
+            const item = sjrData[currentIndex];
+            
+            document.getElementById("current-station").innerText = item.station;
+            document.getElementById("schedule-info").innerText = `Odjezd dle SJŘ: ${item.depTime} | Max: ${item.maxSpeed} km/h`;
+            
+            renderTable();
+            updateDelay();
+        }
+
+        // 6. Tlačítko Další stanice
+        function nextStation() {
+            if (currentIndex < sjrData.length - 1) {
+                selectStation(currentIndex + 1);
+            } else {
+                alert("Jsi na konci jízdního řádu.");
+            }
+        }
+
+        // 7. Výpočet zpoždění oproti hodinám
+        function updateDelay() {
+            if (sjrData.length === 0) return;
+
+            const item = sjrData[currentIndex];
+            if (!item.depTime.includes(":")) return;
+
+            const [h, m] = item.depTime.split(":").map(Number);
+            const now = new Date();
+            
+            const plannedTime = new Date();
+            plannedTime.setHours(h, m, 0, 0);
+
+            // Rozdíl v minutách
+            const diffMs = now - plannedTime;
+            const diffMinutes = Math.floor(diffMs / 60000);
+
+            const statusElem = document.getElementById("status-delay");
+            if (diffMinutes > 0) {
+                statusElem.innerText = `Zpoždění: +${diffMinutes} min`;
+                statusElem.className = "delay-text delay-late";
+            } else if (diffMinutes < 0) {
+                statusElem.innerText = `Předstih: ${Math.abs(diffMinutes)} min`;
+                statusElem.className = "delay-text delay-ok";
+            } else {
+                statusElem.innerText = "Jedeš přesně podle řádu";
+                statusElem.className = "delay-text delay-ok";
+            }
+        }
+    </script>
+</body>
+</html>
